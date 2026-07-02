@@ -2,7 +2,6 @@
 
 WM-811K / MixedWM38 웨이퍼맵과 SECS/GEM 시뮬레이터 기반 합성 공정·장비 데이터를
 lot/wafer 키로 결합해 제공하는 인스턴스 수준 RCA용 MCP 서버.
-(설계 근거: secgem_mcp_dev.md)
 
 ## 설치
 
@@ -47,5 +46,5 @@ get_lot_timeline — 상세 스키마는 `server/tools/` 참조.
 
 ## 범위
 
-전공정~wafer test(EDS)로 한정. 패키징 이후 미지원(secgem_mcp_dev.md §1.2).
-합성 데이터: "인과 구조가 알려진 통제 환경에서의 에이전트 추론 평가"용(§10).
+전공정~wafer test(EDS)로 한정. 패키징 이후 미지원.
+합성 데이터: "인과 구조가 알려진 통제 환경에서의 에이전트 추론 평가"용.
