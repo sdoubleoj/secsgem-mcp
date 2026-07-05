@@ -5,6 +5,11 @@ __pycache__/
 datasets/raw/
 datasets/raw_secs_logs/
 datasets/fab.db
+issue/
+.claude/
+.pytest_cache/
+.DS_Store
+.github/
 # 평가 정답 — 절대 커밋 금지 (gitignore는 인라인 주석 미지원 → 줄 분리)
 datasets/ground_truth/
 *.pkl

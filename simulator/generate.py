@@ -107,6 +107,26 @@ def schedule_lot(lot_id, start_day, fab, eqmap, override=None):
     return rows
 
 
+def alarm_lot_resolver(hist):
+    """장비별 lot 처리 구간 색인 → 알람 발생 시각이 포함되는 lot_id 반환.
+    어느 구간에도 안 들면 None(장비 유휴 중 알람)."""
+    windows = {}
+    for lot_id, _step, eq, _ch, _rcp, ts_in, ts_out in hist:
+        windows.setdefault(eq, []).append((ts_in, ts_out, lot_id))
+    for w in windows.values():
+        w.sort()
+
+    def resolve(eq, t):
+        hit = None
+        for ts_in, ts_out, lot_id in windows.get(eq, ()):
+            if ts_in > t:
+                break
+            if t <= ts_out:
+                hit = lot_id                # 구간이 겹치면 가장 늦게 투입된 lot
+        return hit
+    return resolve
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wm811k", required=True)
@@ -289,6 +309,9 @@ def main():
         maint.append((sc["trap_eq"], ts(sc["t0"] + 12), "PM",
                       "정기 소모품 교체"))          # 함정: 불량 이후 PM (§4.4-2 선후 뒤집힘)
         events.append((sc["trap_eq"], ts(sc["t0"] + 12), "PM", "정기 PM"))
+    resolve_lot = alarm_lot_resolver(hist)          # 알람 ↔ lot 처리 구간 연결 (§4.4-1)
+    alarms = [(eq, resolve_lot(eq, t), t, aid, txt)
+              for eq, _, t, aid, txt in alarms]
     con.executemany("INSERT INTO telemetry VALUES(?,?,?,?)", tel)
     con.executemany("INSERT INTO alarm VALUES(?,?,?,?,?)", alarms)
     con.executemany("INSERT INTO maintenance VALUES(?,?,?,?)", maint)
