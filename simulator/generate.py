@@ -188,18 +188,47 @@ def main():
         used.update(sel)
         return sel
 
+    used_sites = set()                              # (equipment_id, param) — 드리프트 덮어쓰기 방지
+
+    def has_free_site(c):
+        param = c["telemetry_signature"]["param"]
+        return param in (None, "none") or any(
+            (e, param) not in used_sites
+            for e in fab["equipment"][c["equipment_group"]]["instances"])
+
     def pick_cause(pattern):
+        """확률 가중 원인 추첨. 주입 지점이 소진된 원인은 제외하고 재추첨 —
+        모든 원인이 소진됐을 때만 충돌을 허용한다(주입부 안전망이 카드에 기록)."""
+        causes = list(mapping[pattern])
+        while causes:
+            probs = np.array([c["prob"] for c in causes])
+            c = causes[int(r.choice(len(causes), p=probs / probs.sum()))]
+            if has_free_site(c):
+                return c
+            causes.remove(c)
         causes = mapping[pattern]
         probs = np.array([c["prob"] for c in causes])
         return causes[int(r.choice(len(causes), p=probs / probs.sum()))]
+
+    def pick_cause_eq(c):
+        """원인 장비 선택. 이미 드리프트가 심긴 (장비, 파라미터)는 피한다.
+        모든 인스턴스가 사용 중이면 그대로 허용 — 주입부 안전망이 카드에 기록."""
+        grp = fab["equipment"][c["equipment_group"]]
+        param = c["telemetry_signature"]["param"]
+        if param in (None, "none"):                 # 드리프트 없음 → 충돌 개념 없음
+            return grp["instances"][int(r.integers(len(grp["instances"])))], grp
+        pool = [e for e in grp["instances"] if (e, param) not in used_sites] \
+            or grp["instances"]
+        eq = pool[int(r.integers(len(pool)))]
+        used_sites.add((eq, param))
+        return eq, grp
 
     sid = 0
     for i in range(args.n_single):                  # 단일 원인 (WM-811K)
         sid += 1
         p = patterns[i % len(patterns)]
         c = pick_cause(p)
-        grp = fab["equipment"][c["equipment_group"]]
-        eq = grp["instances"][int(r.integers(len(grp["instances"])))]
+        eq, grp = pick_cause_eq(c)
         ch = f"{eq}-CH{int(r.integers(grp['chambers_per_instance'])) + 1}"
         trap_step = next(s for s in fab["route"]
                          if s != c["equipment_group"] and s != "EDS")
@@ -218,8 +247,7 @@ def main():
         cs, sites = [], []
         for p in combo:                             # 원인을 서로 다른 장비·시점에 독립 주입
             c = pick_cause(p)
-            grp = fab["equipment"][c["equipment_group"]]
-            eq = grp["instances"][int(r.integers(len(grp["instances"])))]
+            eq, _ = pick_cause_eq(c)
             cs.append(c)
             sites.append((eq, f"{eq}-CH1"))
         scenarios.append(dict(
@@ -247,6 +275,7 @@ def main():
             wrows.append(("wm811k", lot, w.wafer_id, None, w.dieSize, 1))
 
     drifts = {}                                     # (equipment_id, param) -> (model, t0)
+    drift_owner, clue_lost = {}, set()              # 충돌 시 앞 시나리오의 단서가 소실됨
     for sc in scenarios:
         for lot in sc["lots"]:
             override = {}
@@ -270,7 +299,13 @@ def main():
         for c, (eq, _) in zip(sc["causes"], sc["cause_sites"]):
             sig = c["telemetry_signature"]
             if sig["param"] not in (None, "none"):
-                drifts[(eq, sig["param"])] = (sig["drift"], sc["t0"])
+                key = (eq, sig["param"])
+                if key in drifts:
+                    clue_lost.add(drift_owner[key])
+                    print(f"      경고: 드리프트 충돌 {key} — "
+                          f"{drift_owner[key]}의 단서가 {sc['scenario_id']}에 덮임")
+                drifts[key] = (sig["drift"], sc["t0"])
+                drift_owner[key] = sc["scenario_id"]
     con.executemany("INSERT OR IGNORE INTO wafer VALUES(?,?,?,?,?,?)", wrows)
     con.executemany("INSERT INTO lot_history VALUES(?,?,?,?,?,?,?)", hist)
 
@@ -368,6 +403,12 @@ def main():
                 [f"commonality → {eq}/{ch}" for eq, ch in sc["cause_sites"]] +
                 [f"maintenance BM @ t0 → telemetry {c['telemetry_signature']['param']} "
                  f"{c['telemetry_signature']['drift']}" for c in sc["causes"]],
+            "telemetry_clues": [] if sc["unmatched"] else
+                [{"equipment": eq, "param": c["telemetry_signature"]["param"],
+                  "drift": c["telemetry_signature"]["drift"]}
+                 for c, (eq, _) in zip(sc["causes"], sc["cause_sites"])
+                 if c["telemetry_signature"]["param"] not in (None, "none")],
+            "clue_overwritten": sc["scenario_id"] in clue_lost,  # true면 채점 제외 대상
             "traps_to_reject": [] if sc["unmatched"] else
                 [f"{sc['trap_eq']}: 정상 lot 다수 통과(P3), t0+12d PM은 불량 이후(선후 뒤집힘)"],
         }
