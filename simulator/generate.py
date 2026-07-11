@@ -1,4 +1,4 @@
-"""데이터 생성 파이프라인 (§4.5)
+"""데이터 생성 파이프라인
 
 사용법:
   python -m simulator.generate --wm811k datasets/raw/WM811K.pkl \
@@ -19,7 +19,7 @@ from server._seed import rng
 from preprocess.wm811k_loader import load_wm811k
 from preprocess.mw38_loader import load_mw38
 
-EPOCH = datetime(2026, 1, 1)          # 가상 타임라인 기점 (§4.2 단일 타임라인)
+EPOCH = datetime(2026, 1, 1)          # 가상 타임라인 기점
 
 
 def ts(days: float) -> str:
@@ -41,7 +41,7 @@ def emit_s5f1(equipment_id, ts_, alarm_id, text):
 
 
 def inject_drift(base_range, model, t_days, t0_days, r):
-    """드리프트 어휘 {step_up, step_down, linear_up, linear_down, none} 해석 (§4.3)."""
+    """드리프트 어휘 {step_up, step_down, linear_up, linear_down, none} 해석"""
     lo, hi = base_range
     v = float(r.uniform(lo, hi))
     if model in (None, "none") or t0_days is None or t_days < t0_days:
@@ -135,7 +135,7 @@ def main():
     ap.add_argument("--seed", type=int, default=_seed.GLOBAL_SEED)
     ap.add_argument("--n-single", type=int, default=8)
     ap.add_argument("--n-mixed", type=int, default=2)
-    ap.add_argument("--n-unmatched", type=int, default=2)   # §4.4-5: 전체의 10~20%
+    ap.add_argument("--n-unmatched", type=int, default=2)   # 전체의 10~20%
     ap.add_argument("--n-background", type=int, default=800)
     args = ap.parse_args()
     _seed.GLOBAL_SEED = args.seed                    # CLI 시드가 rng 전체를 지배
@@ -152,7 +152,7 @@ def main():
     print("[1/6] WM-811K 로드 ...")
     wm = load_wm811k(args.wm811k)
     labeled = wm[wm.has_label]
-    # 패턴별 lot 후보: 해당 라벨 wafer를 2장 이상 가진 lot (§4.2 실제 lot 구조 활용)
+    # 패턴별 lot 후보: 해당 라벨 wafer를 2장 이상 가진 lot (실제 lot 구조 활용)
     pat_lots = {p: (labeled[labeled.kg_label == p].groupby("lot_id").size()
                     .loc[lambda s: s >= 2].index.tolist()) for p in mapping}
     normal_lots_all = sorted(labeled.groupby("lot_id")
@@ -176,7 +176,7 @@ def main():
     if args.n_mixed and not mix_combos:
         raise SystemExit("혼합 조합 부족 — mapping_table 패턴과 MW38 조합이 겹치지 않음")
 
-    # ---------- 시나리오 구성 (§4.4) ----------
+    # ---------- 시나리오 구성 ----------
     print("[3/6] 시나리오 구성 ...")
     scenarios, used = [], set()
     patterns = sorted(mapping)

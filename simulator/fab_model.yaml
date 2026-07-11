@@ -1,8 +1,8 @@
 timeline_days: 90
-route: [LITHO, ETCH, DEPO, CMP, CLEAN, EDS]   # 전공정~wafer test (§1.2 범위)
+route: [LITHO, ETCH, DEPO, CMP, CLEAN, EDS]   # 전공정~wafer test
 
 equipment:
-  ETCH:                       # 다중화 없으면 commonality 무의미 (§4.3)
+  ETCH:                       # 다중화 없으면 commonality 무의미
     instances: [ETCH-01, ETCH-02, ETCH-03]
     chambers_per_instance: 3  # ETCH-01-CH1 ...
     params:
@@ -55,7 +55,7 @@ equipment:
     maintenance:
       pm_interval_days: 30
       bm_rate_per_day: 0.004
-  EDS:                        # wafer test — 여기가 시뮬레이션 종점 (§1.2)
+  EDS:                        # wafer test (시뮬레이션 종점)
     instances: [TESTER-01, TESTER-02]
     chambers_per_instance: 1
     params:
