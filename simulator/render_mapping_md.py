@@ -8,9 +8,9 @@ def main():
         "<!-- 자동 생성: python -m simulator.render_mapping_md — 직접 편집 금지 -->",
         "# 결함↔후보 원인 매핑 테이블",
         "",
-        "이 테이블은 (a) 시나리오 생성 스펙, (b) KG 구축 시드, (c) 평가 정답지의 공통 원천.",
-        "단일 진실원본은 `mapping_table.yaml`이며 본 문서는 리뷰용 렌더링.",
-        "리뷰 코멘트(현직자 검토)는 이 파일이 아니라 `mapping_table_review.md`에 남김.",
+        "이 테이블은 (a) 시나리오 생성 스펙, (b) KG 구축 시드, (c) 평가 정답지의 공통 원천임",
+        "원본은 `mapping_table.yaml`이며 본 문서는 리뷰용 렌더링.",
+        "리뷰 코멘트(현직자 검토)는 `mapping_table_review.md`에 남김.",
         "",
     ]
     for pattern, causes in data.items():
@@ -31,3 +31,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# 실행 스크립트
+# python -m simulator.render_mapping_md
