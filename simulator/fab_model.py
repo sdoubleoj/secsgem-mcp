@@ -1,8 +1,3 @@
-"""fab_model.yaml 로더 — 파라미터 정상 범위 조회.
-
-server/tools/query_telemetry 가 정상 범위 표시에 씀
-사실만 반환: 범위 밖 여부 '판단'은 에이전트 몫, 여기선 숫자만 줌
-"""
 import functools
 import pathlib
 

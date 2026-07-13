@@ -13,9 +13,12 @@ def test_mapping_params_exist_in_fab_model():
     for pattern, causes in mapping.items():
         for c in causes:
             param = c["telemetry_signature"]["param"]
-            if param in (None, "none"):     # 이력에만 단서가 있는 원인 (§4.4)
+            if param in (None, "none"):     # 이력에만 단서가 있는 원인
                 continue
             group_params = fab["equipment"][c["equipment_group"]]["params"]
             assert param in group_params, (
                 f"{pattern}/{c['cause']}의 단서 param '{param}'이 "
-                f"{c['equipment_group']} 장비 params에 없음 (§4.6)")
+                f"{c['equipment_group']} 장비 params에 없음")
+            
+# 실행 스크립트
+# pytest tests/test_fab_model_consistency.py -q

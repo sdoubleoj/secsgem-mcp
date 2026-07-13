@@ -1,14 +1,11 @@
+"""T5: query_telemetry (S6F11 장비 파라미터 시계열 + 정상 범위)"""
 import math
 
 from server.schemas import respond
 from server.db import query
 from simulator.fab_model import normal_range   # fab_model.yaml 로더
 
-MAX_POINTS = 500   # 컨텍스트 폭주 방지 (§5.2-4)
-
-def downsample(rows: list, max_points: int) -> list:
-    """균일 간격 다운샘플 — 반환 개수 ≤ max_points 보장."""
-    return rows[::math.ceil(len(rows) / max_points) or 1]
+MAX_POINTS = 500   # 컨텍스트 폭주 방지a
 
 def register(mcp):
     @mcp.tool()
@@ -22,7 +19,7 @@ def register(mcp):
                " ORDER BY ts")
         args = (equipment_id, *time_range, *(params or []))
         rows = [dict(r) for r in query(sql, args)]
-        downsampled = downsample(rows, max_points)
+        downsampled = rows[::max(1, len(rows) // max_points)]  # 균일 다운샘플링
         return respond({
             "equipment_id": equipment_id,
             "series": downsampled,

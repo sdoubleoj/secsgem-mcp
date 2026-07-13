@@ -1,10 +1,9 @@
 """데이터 생성 파이프라인
 
 사용법:
-  python -m simulator.generate --wm811k datasets/raw/WM811K.pkl \
-      --mw38 datasets/raw/Wafer_Map_Datasets.npz --out datasets --seed 20260101
+  python -m simulator.generate --wm811k datasets/raw/WM811K.pkl --out datasets --seed 20260101
 
-시드 고정 배치 생성: 같은 인자 → byte-identical 산출물.
+시드 고정 배치 생성: 같은 인자 → byte-identical 산출물
 산출물: <out>/fab.db, <out>/raw_secs_logs/, <out>/ground_truth/ (서버는 ground_truth 미접근)
 """
 import argparse, io, json, pathlib, sqlite3
@@ -17,7 +16,6 @@ import secsgem.secs as secs
 from server import _seed
 from server._seed import rng
 from preprocess.wm811k_loader import load_wm811k
-from preprocess.mw38_loader import load_mw38
 
 EPOCH = datetime(2026, 1, 1)          # 가상 타임라인 기점
 
@@ -27,7 +25,7 @@ def ts(days: float) -> str:
 
 
 def emit_s6f11(equipment_id, ts_, param, value):
-    """S6F11(이벤트/트레이스) 표준 SECS-II 메시지 — 원본 로그 보관용."""
+    """S6F11(이벤트/트레이스) 표준 SECS-II 메시지 — 원본 로그 보관용"""
     return secs.functions.SecsS06F11({
         "DATAID": 0, "CEID": 1,
         "RPT": [{"RPTID": 1, "V": [equipment_id, ts_, param, float(value)]}],
@@ -35,7 +33,7 @@ def emit_s6f11(equipment_id, ts_, param, value):
 
 
 def emit_s5f1(equipment_id, ts_, alarm_id, text):
-    """S5F1(알람)."""
+    """S5F1(알람)"""
     return secs.functions.SecsS05F01(
         {"ALCD": 0b1000_0001, "ALID": alarm_id, "ALTX": text})
 
@@ -130,11 +128,9 @@ def alarm_lot_resolver(hist):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wm811k", required=True)
-    ap.add_argument("--mw38", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=_seed.GLOBAL_SEED)
-    ap.add_argument("--n-single", type=int, default=8)
-    ap.add_argument("--n-mixed", type=int, default=2)
+    ap.add_argument("--n-single", type=int, default=9)   # 3클래스 × 원인 3종 커버
     ap.add_argument("--n-unmatched", type=int, default=2)   # 전체의 10~20%
     ap.add_argument("--n-background", type=int, default=800)
     args = ap.parse_args()
@@ -143,14 +139,17 @@ def main():
     out = pathlib.Path(args.out)
     (out / "raw_secs_logs").mkdir(parents=True, exist_ok=True)
     (out / "ground_truth").mkdir(parents=True, exist_ok=True)
+    for stale in (out / "ground_truth").glob("*.json"):
+        stale.unlink()                               # 이전 빌드 정답 카드 잔류 방지
 
     fab = yaml.safe_load(pathlib.Path("simulator/fab_model.yaml").read_text())
     mapping = yaml.safe_load(pathlib.Path("simulator/mapping_table.yaml").read_text())
     eqmap = equipment_instances(fab)
     days = fab["timeline_days"]
 
-    print("[1/6] WM-811K 로드 ...")
+    print("[1/5] WM-811K 로드 ...")
     wm = load_wm811k(args.wm811k)
+    wm = wm[wm.scope != "excluded"]                  # §4.1 제외 6클래스 타임라인 미유입
     labeled = wm[wm.has_label]
     # 패턴별 lot 후보: 해당 라벨 wafer를 2장 이상 가진 lot (실제 lot 구조 활용)
     pat_lots = {p: (labeled[labeled.kg_label == p].groupby("lot_id").size()
@@ -164,20 +163,8 @@ def main():
     print(f"      패턴별 lot 후보 { {p: len(v) for p, v in pat_lots.items()} }, "
           f"배경 정상 lot {len(bg_lots)}")
 
-    print("[2/6] MixedWM38 로드 ...")
-    mw = load_mw38(args.mw38)
-    pairs = {}                                       # 혼합 조합 → wafer 레코드
-    for rec in mw:
-        key = tuple(sorted(rec["kg_labels"]))
-        if len(key) == 2 and all(k in mapping for k in key):
-            pairs.setdefault(key, []).append(rec)
-    mix_combos = [k for k, v in sorted(pairs.items()) if len(v) >= 20]
-    print(f"      사용 가능 혼합 조합: {mix_combos}")
-    if args.n_mixed and not mix_combos:
-        raise SystemExit("혼합 조합 부족 — mapping_table 패턴과 MW38 조합이 겹치지 않음")
-
     # ---------- 시나리오 구성 ----------
-    print("[3/6] 시나리오 구성 ...")
+    print("[2/5] 시나리오 구성 ...")
     scenarios, used = [], set()
     patterns = sorted(mapping)
     r = rng("scenario", "plan")
@@ -237,24 +224,6 @@ def main():
             scenario_id=f"SC-{sid:03d}", patterns=[p], causes=[c], lots=pick_lots(p),
             cause_sites=[(eq, ch)], t0=float(r.uniform(10, days - 20)),
             trap_eq=trap_eq, trap_step=trap_step, unmatched=False, source="wm811k"))
-    for i in range(args.n_mixed):                   # 복합 원인 (MixedWM38, §4.4-6)
-        sid += 1
-        combo = mix_combos[i % len(mix_combos)]
-        recs = pairs[combo][:25]
-        vlot = f"SVLOT-{sid:03d}"
-        for rec in recs:
-            rec["lot_id"] = vlot                    # 시나리오 전용 가상 lot
-        cs, sites = [], []
-        for p in combo:                             # 원인을 서로 다른 장비·시점에 독립 주입
-            c = pick_cause(p)
-            eq, _ = pick_cause_eq(c)
-            cs.append(c)
-            sites.append((eq, f"{eq}-CH1"))
-        scenarios.append(dict(
-            scenario_id=f"SC-{sid:03d}", patterns=list(combo), causes=cs, lots=[vlot],
-            cause_sites=sites, t0=float(r.uniform(10, days - 20)),
-            trap_eq=fab["equipment"]["LITHO"]["instances"][0], trap_step="LITHO",
-            unmatched=False, source="mw38", mw_records=recs))
     for i in range(args.n_unmatched):               # 매칭불가 (P7): 원인 미주입
         sid += 1
         p = patterns[i % len(patterns)]
@@ -264,7 +233,7 @@ def main():
             unmatched=True, source="wm811k"))
 
     # ---------- DB 기록 ----------
-    print("[4/6] lot 이력·wafer 기록 ...")
+    print("[3/5] lot 이력·wafer 기록 ...")
     con = build_db(out / "fab.db")
     r = rng("timeline")
     hist, wrows = [], []
@@ -288,14 +257,9 @@ def main():
             else:
                 start = float(r.uniform(0, days - 2))
             hist += schedule_lot(lot, start, fab, eqmap, override)
-            if sc["source"] == "wm811k":
-                for _, w in wm[wm.lot_id == lot].iterrows():
-                    wrows.append(("wm811k", lot, w.wafer_id,
-                                  _blob(w.waferMap), w.dieSize, int(w.is_normal)))
-        if sc["source"] == "mw38":
-            for rec in sc["mw_records"]:
-                wrows.append(("mw38", rec["lot_id"], rec["wafer_id"],
-                              _blob(rec["waferMap"]), None, int(rec["is_normal"])))
+            for _, w in wm[wm.lot_id == lot].iterrows():
+                wrows.append(("wm811k", lot, w.wafer_id,
+                              _blob(w.waferMap), w.dieSize, int(w.is_normal)))
         for c, (eq, _) in zip(sc["causes"], sc["cause_sites"]):
             sig = c["telemetry_signature"]
             if sig["param"] not in (None, "none"):
@@ -309,7 +273,7 @@ def main():
     con.executemany("INSERT OR IGNORE INTO wafer VALUES(?,?,?,?,?,?)", wrows)
     con.executemany("INSERT INTO lot_history VALUES(?,?,?,?,?,?,?)", hist)
 
-    print("[5/6] 텔레메트리·알람·정비·지표 ...")
+    print("[4/5] 텔레메트리·알람·정비·지표 ...")
     tel, alarms, maint, events = [], [], [], []
     for step, spec in fab["equipment"].items():
         for eq in spec["instances"]:
@@ -364,7 +328,7 @@ def main():
                      for (eq, day), (nt, nd) in sorted(agg.items())])
     con.commit()
 
-    print("[6/6] SECS 원본 로그·ground truth ...")
+    print("[5/5] SECS 원본 로그·ground truth ...")
     fallback = 0
     with open(out / "raw_secs_logs" / "alarm_s5f1.log", "w") as f:
         for eq, _lot, t, aid, txt in alarms:
@@ -423,3 +387,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# 실행 스크립트
+# python -m simulator.generate \
+#   --wm811k datasets/raw/WM811K.pkl \
+#   --out    datasets --seed 20260101

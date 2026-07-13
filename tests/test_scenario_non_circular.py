@@ -1,4 +1,4 @@
-# 순환성 회피 검증 — 데이터 빌드(simulator.generate) 이후에만 유효
+# 순환성 회피 검증: 데이터 빌드(simulator.generate) 이후에만 유효
 import json, pathlib
 from collections import defaultdict
 
@@ -26,7 +26,7 @@ def test_defect_alone_underdetermines_cause():
 
 
 def test_unmatched_ratio():
-    """매칭불가 시나리오가 전체의 10~20% (§4.4-5, P7)."""
+    """매칭불가 시나리오가 전체의 10~20%"""
     cards = _cards()
     ratio = sum(c["is_unmatched"] for c in cards) / len(cards)
     assert 0.10 <= ratio <= 0.20, f"매칭불가 비율 {ratio:.2f}"

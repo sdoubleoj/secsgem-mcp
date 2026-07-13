@@ -1,3 +1,5 @@
+import typing
+
 _ALIGN = {
     "Center":    "Center",
     "Donut":     "Donut",
@@ -21,7 +23,7 @@ def to_kg_entity(label: str) -> str:
             return kg
     raise KeyError(f"미정의 라벨: {label!r} — mapping_table과 정렬 사전 점검 필요")
 
-def scope_of(kg_label: str | None) -> str:
+def scope_of(kg_label: typing.Optional[str]) -> str:
     """scenario | normal | excluded | unlabeled"""
     if kg_label is None:
         return "unlabeled"
