@@ -18,3 +18,5 @@ datasets/ground_truth/
 *.pkl
 *.npz
 eval/results.json
+
+uv.lock
