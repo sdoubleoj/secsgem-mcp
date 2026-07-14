@@ -13,7 +13,7 @@ def _cards():
 
 
 def test_defect_alone_underdetermines_cause():
-    """같은 결함 패턴에 2개 이상 원인이 존재해야 순환성 회피 성립."""
+    """같은 결함 패턴에 2개 이상 원인이 존재해야 순환성 회피 성립"""
     cards = _cards()
     assert cards, "ground_truth 없음 — python -m simulator.generate 먼저 실행"
     causes = defaultdict(set)
