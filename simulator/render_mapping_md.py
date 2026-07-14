@@ -17,14 +17,17 @@ def main():
         lines += [
             f"## {pattern}",
             "",
-            "| cause | process | equipment_group | prob | telemetry (param / drift) | citation |",
-            "|---|---|---|---|---|---|",
+            "| cause | process | equipment_group | prob | telemetry (param / drift) "
+            "| shape | maint_event | part | citation |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         for c in causes:
             sig = c["telemetry_signature"]
             lines.append(
                 f"| {c['cause']} | {c['process']} | {c['equipment_group']} "
-                f"| {c['prob']} | {sig['param']} / {sig['drift']} | {c['citation']} |")
+                f"| {c['prob']} | {sig['param']} / {sig['drift']} "
+                f"| {c.get('shape', '-')} | {str(c.get('maint_event', True)).lower()} "
+                f"| {c.get('part', '-')} | {c['citation']} |")
         lines.append("")
     pathlib.Path("simulator/mapping_table.md").write_text("\n".join(lines), encoding="utf-8")
     print("rendered simulator/mapping_table.md")
