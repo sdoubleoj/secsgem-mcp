@@ -4,37 +4,43 @@ Edge-Ring:
     equipment_group: ETCH
     prob: 0.60
     telemetry_signature: {param: rf_power, drift: step_up}
+    part: RF 매칭 유닛   # 정비 이력에 기록되는 부품명 — 원인 ID 노출 금지 (T7은 이 텍스트를 그대로 반환)
     citation: "Wang et al., IEEE TSM 2020"
   - cause: cmp_edge_overpolish     # CMP 에지 과연마
     process: CMP
     equipment_group: CMP
     prob: 0.25
     telemetry_signature: {param: down_force, drift: linear_up}
+    part: 리테이너 링
     citation: "NO_CITATION"
   - cause: clean_residue           # 세정 문제
     process: CLEAN
     equipment_group: CLEAN
     prob: 0.15
     telemetry_signature: {param: flow_rate, drift: none}   # 이력에만 단서
+    part: 약액 공급 필터
     citation: "NO_CITATION"
 Center:
-  - cause: deposition_center_thickness  # 증착 중앙부 두께 이상
+  - cause: deposition_center_thickness  # 증착 중앙부 두께 이상 (샤워헤드 막힘 — 누적형)
     process: DEPO
     equipment_group: DEPO
     prob: 0.55
-    telemetry_signature: {param: chamber_pressure, drift: step_up}
+    telemetry_signature: {param: chamber_pressure, drift: linear_up}
+    maint_event: false   # 무이벤트 누적형: t0에 정비 기록 없음 — 시작점 단서는 T8 변화점뿐
     citation: "Wu et al., IEEE TSM 2015"
   - cause: cmp_center_overpolish        # CMP 중앙 과연마
     process: CMP
     equipment_group: CMP
     prob: 0.25
     telemetry_signature: {param: slurry_flow, drift: linear_up}
+    part: 슬러리 공급 펌프
     citation: "NO_CITATION"
   - cause: clean_nozzle_clog            # 세정 노즐 막힘 → 중앙 잔류
     process: CLEAN
     equipment_group: CLEAN
     prob: 0.20
     telemetry_signature: {param: flow_rate, drift: linear_down}
+    part: 분사 노즐
     citation: "NO_CITATION"
 Scratch:
   - cause: cmp_pad_wear                 # CMP 패드 마모/컨디셔닝 이상
@@ -42,16 +48,20 @@ Scratch:
     equipment_group: CMP
     prob: 0.45
     telemetry_signature: {param: pad_usage_hours, drift: linear_up}
+    shape: consumable_wear   # 수명 아크: 직전 교체 → 누적 → 수명 초과(t0) → 불량 집중 → 교체(t0+9d)로 종결
+    part: 연마 패드
     citation: "Wu et al., IEEE TSM 2015"
   - cause: cmp_slurry_particle          # 슬러리 대입자 스크래치 (교체 주기와 무관)
     process: CMP
     equipment_group: CMP
     prob: 0.35
     telemetry_signature: {param: slurry_flow, drift: step_up}
+    part: 슬러리 필터
     citation: "NO_CITATION"
   - cause: clean_brush_contact          # 세정 브러시 접촉 이상
     process: CLEAN
     equipment_group: CLEAN
     prob: 0.20
     telemetry_signature: {param: none, drift: none}   # 정비(브러시 교체) 이력에만 단서
+    part: 세정 브러시
     citation: "NO_CITATION"
