@@ -18,13 +18,13 @@ equipment:
     params:
       down_force:  {normal: [4.5, 5.5], unit: psi}
       slurry_flow: {normal: [180, 220], unit: ml/min}
-      pad_usage_hours: {normal: [0, 250], unit: h, drift_models: [linear, none]} # mapping_table의 cmp_pad_wear 단서
+      pad_usage_hours: {normal: [0, 250], unit: h, counter_rate_per_day: 11} # 소모품 카운터 — 교체(PM) 시 리셋, cmp_pad_wear 단서 (11h/일 × PM 주기 21일 ≈ 231h < 250h)
     maintenance: {pm_interval_days: 21, bm_rate_per_day: 0.008}
   DEPO:
     instances: [DEPO-01, DEPO-02, DEPO-03]
     chambers_per_instance: 2
     params:
-      chamber_pressure: {normal: [2.0, 3.0], unit: Torr, drift_models: [step, none]}  # mapping_table의 deposition 단서
+      chamber_pressure: {normal: [2.0, 3.0], unit: Torr, drift_models: [linear, none]}  # mapping_table의 deposition 단서 (누적형)
       rf_power:         {normal: [450, 550], unit: W}
       gas_flow:         {normal: [90, 110], unit: sccm}
       susceptor_temp:   {normal: [390, 410], unit: C}
