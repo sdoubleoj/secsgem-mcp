@@ -38,11 +38,14 @@ def emit_s5f1(equipment_id, ts_, alarm_id, text):
         {"ALCD": 0b1000_0001, "ALID": alarm_id, "ALTX": text})
 
 
-def inject_drift(base_range, model, t_days, t0_days, r):
-    """드리프트 어휘 {step_up, step_down, linear_up, linear_down, none} 해석"""
+def inject_drift(base_range, model, t_days, t0_days, r, t_end_days=None):
+    """드리프트 어휘 {step_up, step_down, linear_up, linear_down, none} 해석.
+    t_end_days 이후는 정상 복귀 — 종결 이벤트(소모품 교체 등)가 있는 원인용."""
     lo, hi = base_range
     v = float(r.uniform(lo, hi))
     if model in (None, "none") or t0_days is None or t_days < t0_days:
+        return v
+    if t_end_days is not None and t_days >= t_end_days:
         return v
     span = hi - lo
     if model == "step_up":     return v + 0.15 * span
@@ -90,7 +93,7 @@ def equipment_instances(fab):
 
 
 def schedule_lot(lot_id, start_day, fab, eqmap, override=None):
-    """lot 1개의 route 통과 이력. override={step: (eq, chamber)} 로 시나리오 강제 배정."""
+    """lot 1개의 route 통과 이력. override={step: (eq, chamber)} 로 시나리오 강제 배정"""
     r = rng("route", lot_id)
     rows, t = [], start_day
     for step in fab["route"]:
@@ -134,7 +137,7 @@ def main():
     ap.add_argument("--n-unmatched", type=int, default=2)   # 전체의 10~20%
     ap.add_argument("--n-background", type=int, default=800)
     args = ap.parse_args()
-    _seed.GLOBAL_SEED = args.seed                    # CLI 시드가 rng 전체를 지배
+    _seed.GLOBAL_SEED = args.seed
 
     out = pathlib.Path(args.out)
     (out / "raw_secs_logs").mkdir(parents=True, exist_ok=True)
@@ -149,7 +152,7 @@ def main():
 
     print("[1/5] WM-811K 로드 ...")
     wm = load_wm811k(args.wm811k)
-    wm = wm[wm.scope != "excluded"]                  # §4.1 제외 6클래스 타임라인 미유입
+    wm = wm[wm.scope != "excluded"]                  # 제외된 6클래스 타임라인 미유입
     labeled = wm[wm.has_label]
     # 패턴별 lot 후보: 해당 라벨 wafer를 2장 이상 가진 lot (실제 lot 구조 활용)
     pat_lots = {p: (labeled[labeled.kg_label == p].groupby("lot_id").size()
@@ -220,11 +223,12 @@ def main():
         trap_step = next(s for s in fab["route"]
                          if s != c["equipment_group"] and s != "EDS")
         trap_eq = fab["equipment"][trap_step]["instances"][0]
+        t0_lo = 26 if c.get("shape") == "consumable_wear" else 10   # 아크: 수명 누적 구간(~23일) 선행 확보
         scenarios.append(dict(
             scenario_id=f"SC-{sid:03d}", patterns=[p], causes=[c], lots=pick_lots(p),
-            cause_sites=[(eq, ch)], t0=float(r.uniform(10, days - 20)),
+            cause_sites=[(eq, ch)], t0=float(r.uniform(t0_lo, days - 20)),
             trap_eq=trap_eq, trap_step=trap_step, unmatched=False, source="wm811k"))
-    for i in range(args.n_unmatched):               # 매칭불가 (P7): 원인 미주입
+    for i in range(args.n_unmatched):               # 매칭불가: 원인 미주입
         sid += 1
         p = patterns[i % len(patterns)]
         scenarios.append(dict(
@@ -238,19 +242,21 @@ def main():
     r = rng("timeline")
     hist, wrows = [], []
 
-    for lot in bg_lots:                             # 배경 물량 (P3 negative evidence 모수)
+    for lot in bg_lots:                             # 배경 물량 (negative evidence 모수)
         hist += schedule_lot(lot, float(r.uniform(0, days - 2)), fab, eqmap)
         for _, w in wm[wm.lot_id == lot].iterrows():
             wrows.append(("wm811k", lot, w.wafer_id, None, w.dieSize, 1))
 
-    drifts = {}                                     # (equipment_id, param) -> (model, t0)
+    drifts = {}                                     # (equipment_id, param) -> (model, t0, t_end)
+    arcs = {}                                       # equipment_id -> (직전 교체, 종결 교체) — 소모품 수명 아크
+    gaps = {}                                       # equipment_id -> (시작, 끝) — 텔레메트리 결측 창 (C2)
     drift_owner, clue_lost = {}, set()              # 충돌 시 앞 시나리오의 단서가 소실됨
     for sc in scenarios:
         for lot in sc["lots"]:
             override = {}
             if not sc["unmatched"]:
                 for c, (eq, ch) in zip(sc["causes"], sc["cause_sites"]):
-                    override[c["equipment_group"]] = (eq, ch)      # 지지: commonality (§4.4-1)
+                    override[c["equipment_group"]] = (eq, ch)      # 지지: commonality
                 override[sc["trap_step"]] = (sc["trap_eq"],
                                              f"{sc['trap_eq']}-CH1")  # 함정: 공유하지만 무죄인 장비
                 start = sc["t0"] + float(r.uniform(0.2, 7))        # 지지: 원인 이벤트 직후 (선후관계)
@@ -262,14 +268,29 @@ def main():
                               _blob(w.waferMap), w.dieSize, int(w.is_normal)))
         for c, (eq, _) in zip(sc["causes"], sc["cause_sites"]):
             sig = c["telemetry_signature"]
-            if sig["param"] not in (None, "none"):
-                key = (eq, sig["param"])
-                if key in drifts:
-                    clue_lost.add(drift_owner[key])
-                    print(f"      경고: 드리프트 충돌 {key} — "
-                          f"{drift_owner[key]}의 단서가 {sc['scenario_id']}에 덮임")
-                drifts[key] = (sig["drift"], sc["t0"])
-                drift_owner[key] = sc["scenario_id"]
+            if sig["param"] in (None, "none"):
+                continue
+            key = (eq, sig["param"])
+            if key in drift_owner:
+                clue_lost.add(drift_owner[key])
+                print(f"      경고: 드리프트 충돌 {key} — "
+                      f"{drift_owner[key]}의 단서가 {sc['scenario_id']}에 덮임")
+            drift_owner[key] = sc["scenario_id"]
+            if c.get("shape") == "consumable_wear":
+                # 수명 아크: inject_drift 대신 카운터 리셋 억제로 실현.
+                # t0 = 수명 초과 시점, 직전 교체는 (상한/일일누적률)일 전, 종결 교체는 t0+9d.
+                ps = fab["equipment"][c["equipment_group"]]["params"][sig["param"]]
+                life = ps["normal"][1] / ps["counter_rate_per_day"]
+                arcs[eq] = (sc["t0"] - life, sc["t0"] + 9.0)
+            else:
+                drifts[key] = (sig["drift"], sc["t0"], None)
+        for c, (eq, _) in zip(sc["causes"], sc["cause_sites"]):
+            if c["telemetry_signature"]["param"] not in (None, "none"):
+                if eq not in gaps:                  # 결측 창(C2): 원인 장비 텔레메트리 1~2일 결손
+                    g0 = sc["t0"] + float(r.uniform(2.5, 6.0))
+                    gaps[eq] = (g0, g0 + float(r.uniform(1.0, 2.0)))
+                    sc["gap"] = (eq, *gaps[eq])
+                break
     con.executemany("INSERT OR IGNORE INTO wafer VALUES(?,?,?,?,?,?)", wrows)
     con.executemany("INSERT INTO lot_history VALUES(?,?,?,?,?,?,?)", hist)
 
@@ -278,37 +299,65 @@ def main():
     for step, spec in fab["equipment"].items():
         for eq in spec["instances"]:
             re_ = rng("tel", eq)
-            for param, ps in spec["params"].items():
-                model, t0 = drifts.get((eq, param), (None, None))
-                for k in range(days * 12):          # 2시간 간격
-                    t = k / 12
-                    tel.append((eq, ts(t), param,
-                                inject_drift(ps["normal"], model, t, t0, re_)))
+            arc = arcs.get(eq)                      # 소모품 수명 아크 (직전 교체, 종결 교체)
+            gap = gaps.get(eq)                      # 결측 창 (C2)
             mspec = spec["maintenance"]
+            pm_times = []
             for k in range(int(days // mspec["pm_interval_days"])):   # 정기 PM
                 t = (k + 1) * mspec["pm_interval_days"] + float(re_.uniform(-1, 1))
+                if arc and arc[0] < t < arc[1]:
+                    continue                        # 아크 구간: 정기 교체 누락 — 수명 초과 상황 연출
+                pm_times.append(t)
                 maint.append((eq, ts(t), "PM", "정기 소모품 교체"))
                 events.append((eq, ts(t), "PM", "정기 PM"))
-            for d in range(days):                   # 교란: 무작위 BM·알람 (§4.4-3)
+            resets = sorted(pm_times + (list(arc) if arc else []))    # 카운터 리셋 시점
+            for param, ps in spec["params"].items():
+                model, t0, t_end = drifts.get((eq, param), (None, None, None))
+                rate = ps.get("counter_rate_per_day")
+                lo, hi = ps["normal"]
+                was_out, n_alarm = False, 0
+                for k in range(days * 12):          # 2시간 간격
+                    t = k / 12
+                    if gap and gap[0] <= t < gap[1]:
+                        continue                    # 결측 창 — 포인트 미기록 (coverage.missing 근거)
+                    if rate is not None:            # 소모품 카운터: 마지막 교체 이후 누적
+                        last = max((x for x in resets if x <= t), default=0.0)
+                        v = max(0.0, rate * (t - last) + float(re_.uniform(-2, 2)))
+                    else:
+                        v = inject_drift(ps["normal"], model, t, t0, re_, t_end)
+                    tel.append((eq, ts(t), param, v))
+                    oob = not (lo <= v <= hi)
+                    if oob and not was_out and n_alarm < 6:   # 임계 교차(상승 에지) 알람 — 드리프트에 후행
+                        alarms.append((eq, None, ts(t), 3000 + n_alarm,
+                                       f"{param} out of range"))
+                        n_alarm += 1
+                    was_out = oob
+            for d in range(days):                   # 교란: 무작위 BM/알람
                 if re_.uniform() < mspec["bm_rate_per_day"]:
                     maint.append((eq, ts(d + 0.3), "BM", "돌발 수리"))
                     events.append((eq, ts(d + 0.3), "BM", "돌발 BM"))
                 if re_.uniform() < 0.08:
                     alarms.append((eq, None, ts(d + float(re_.uniform(0, 1))),
                                    int(1000 + re_.integers(50)), "minor interlock warning"))
-    for sc in scenarios:                            # 시나리오 신호 주입
+    for sc in scenarios:                            # 시나리오 신호 주입 (알람은 임계 교차로 위에서 생성)
         if sc["unmatched"]:
             continue
         for c, (eq, ch) in zip(sc["causes"], sc["cause_sites"]):
-            maint.append((eq, ts(sc["t0"]), "BM", f"{c['cause']} 관련 부품 교체"))
-            events.append((eq, ts(sc["t0"]), "BM", "부품 교체 후 재가동"))
-            for j in range(3):                      # 지지: 원인 시점 알람 (§4.4-1)
-                alarms.append((eq, None, ts(sc["t0"] + 0.5 + j), 3000 + j,
-                               f"{c['telemetry_signature']['param']} out of range"))
+            # parts 텍스트는 T7이 그대로 반환 — 원인 ID 대신 부품명만 기록 (정답 누출 방지)
+            if c.get("shape") == "consumable_wear":  # 수명 아크: 직전 교체·종결 교체 이력
+                t_prev, t_repl = arcs[eq]
+                maint.append((eq, ts(t_prev), "BM", f"소모품 교체: {c['part']}"))
+                maint.append((eq, ts(t_repl), "BM", f"소모품 교체: {c['part']}"))
+                events.append((eq, ts(t_prev), "BM", "소모품 교체"))
+                events.append((eq, ts(t_repl), "BM", "소모품 교체(불량 종결)"))
+            elif c.get("maint_event", True):        # 이벤트형 원인: t0 정비 기록
+                maint.append((eq, ts(sc["t0"]), "BM", f"부품 교체: {c['part']}"))
+                events.append((eq, ts(sc["t0"]), "BM", "부품 교체 후 재가동"))
+            # maint_event: false → 무이벤트 누적형: 단서는 T5 드리프트 + T8 변화점뿐
         maint.append((sc["trap_eq"], ts(sc["t0"] + 12), "PM",
-                      "정기 소모품 교체"))          # 함정: 불량 이후 PM (§4.4-2 선후 뒤집힘)
+                      "정기 소모품 교체"))          # 함정: 불량 이후 PM (선후 뒤집힘)
         events.append((sc["trap_eq"], ts(sc["t0"] + 12), "PM", "정기 PM"))
-    resolve_lot = alarm_lot_resolver(hist)          # 알람 ↔ lot 처리 구간 연결 (§4.4-1)
+    resolve_lot = alarm_lot_resolver(hist)          # 알람 ↔ lot 처리 구간 연결
     alarms = [(eq, resolve_lot(eq, t), t, aid, txt)
               for eq, _, t, aid, txt in alarms]
     con.executemany("INSERT INTO telemetry VALUES(?,?,?,?)", tel)
@@ -339,11 +388,11 @@ def main():
                 body = f"S5F1 ALID={aid} ALTX={txt}"
             f.write(f"{t} {eq} {body}\n")
     with open(out / "raw_secs_logs" / "trace_s6f11.log", "w") as f:
-        for (eq, param), (model, t0) in sorted(drifts.items()):
+        for (eq, param), (model, t0, t_end) in sorted(drifts.items()):
             re_ = rng("log", eq, param)
             for k in range(60):                     # 드리프트 구간 표본
                 t = t0 + k / 12
-                v = inject_drift((0, 1), model, t, t0, re_)
+                v = inject_drift((0, 1), model, t, t0, re_, t_end)
                 try:
                     body = str(emit_s6f11(eq, ts(t), param, v)).replace("\n", " ")
                 except Exception:
@@ -353,7 +402,15 @@ def main():
     if fallback:
         print(f"      경고: secsgem 인코딩 실패 {fallback}건 → 텍스트 라인으로 대체 기록")
 
-    for sc in scenarios:                            # 정답 카드 — 서버 미접근 (§4.5)
+    def _evidence(c):
+        p, d = c["telemetry_signature"]["param"], c["telemetry_signature"]["drift"]
+        if c.get("shape") == "consumable_wear":
+            return f"수명 초과 @ t0 → {p} 정상 상한 초과, t0+9d 교체로 종결 (교체≠원인)"
+        if not c.get("maint_event", True):
+            return f"무이벤트 누적형 → telemetry {p} {d} (시작점 근거는 T8 변화점)"
+        return f"maintenance BM @ t0 → telemetry {p} {d}"
+
+    for sc in scenarios:                            # 정답 카드 — 서버 미접근
         card = {
             "scenario_id": sc["scenario_id"],
             "defect_patterns": sc["patterns"],
@@ -365,8 +422,15 @@ def main():
             "t0": ts(sc["t0"]) if sc["t0"] is not None else None,
             "key_evidence_path": [] if sc["unmatched"] else
                 [f"commonality → {eq}/{ch}" for eq, ch in sc["cause_sites"]] +
-                [f"maintenance BM @ t0 → telemetry {c['telemetry_signature']['param']} "
-                 f"{c['telemetry_signature']['drift']}" for c in sc["causes"]],
+                [_evidence(c) for c in sc["causes"]],
+            "coverage_gap": None if "gap" not in sc else {
+                "equipment": sc["gap"][0],
+                "from": ts(sc["gap"][1]), "to": ts(sc["gap"][2])},
+            "lifecycle": [
+                {"equipment": eq, "prev_replacement": ts(arcs[eq][0]),
+                 "life_exceeded": ts(sc["t0"]), "replacement": ts(arcs[eq][1])}
+                for c, (eq, _) in zip(sc["causes"], sc["cause_sites"])
+                if c.get("shape") == "consumable_wear"],
             "telemetry_clues": [] if sc["unmatched"] else
                 [{"equipment": eq, "param": c["telemetry_signature"]["param"],
                   "drift": c["telemetry_signature"]["drift"]}
@@ -374,7 +438,10 @@ def main():
                  if c["telemetry_signature"]["param"] not in (None, "none")],
             "clue_overwritten": sc["scenario_id"] in clue_lost,  # true면 채점 제외 대상
             "traps_to_reject": [] if sc["unmatched"] else
-                [f"{sc['trap_eq']}: 정상 lot 다수 통과(P3), t0+12d PM은 불량 이후(선후 뒤집힘)"],
+                [f"{sc['trap_eq']}: 정상 lot 다수 통과, t0+12d PM은 불량 이후(선후 뒤집힘)"] +
+                [f"{eq}: 종결 교체(t0+9d)를 원인으로 오독 금지 — 불량은 교체 '직전' 집중"
+                 for c, (eq, _) in zip(sc["causes"], sc["cause_sites"])
+                 if c.get("shape") == "consumable_wear"],
         }
         (out / "ground_truth" / f"{sc['scenario_id']}.json").write_text(
             json.dumps(card, ensure_ascii=False, sort_keys=True, indent=2))
