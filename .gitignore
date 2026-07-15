@@ -16,5 +16,3 @@ issue/
 # 평가 정답 — 절대 커밋 금지
 *.pkl
 *.npz
-
-uv.lock
