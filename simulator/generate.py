@@ -281,7 +281,9 @@ def main():
                 # t0 = 수명 초과 시점, 직전 교체는 (상한/일일누적률)일 전, 종결 교체는 t0+9d.
                 ps = fab["equipment"][c["equipment_group"]]["params"][sig["param"]]
                 life = ps["normal"][1] / ps["counter_rate_per_day"]
-                arcs[eq] = (sc["t0"] - life, sc["t0"] + 9.0)
+                arc = (sc["t0"] - life, sc["t0"] + 9.0)
+                sc.setdefault("arcs", {})[eq] = arc  # 시나리오 소유 스냅숏 — 카드·정비 이력의 원천
+                arcs[eq] = arc                       # 텔레메트리는 최종 아크만 실현 (덮인 쪽은 clue_overwritten)
             else:
                 drifts[key] = (sig["drift"], sc["t0"], None)
         for c, (eq, _) in zip(sc["causes"], sc["cause_sites"]):
@@ -345,7 +347,7 @@ def main():
         for c, (eq, ch) in zip(sc["causes"], sc["cause_sites"]):
             # parts 텍스트는 T7이 그대로 반환 — 원인 ID 대신 부품명만 기록 (정답 누출 방지)
             if c.get("shape") == "consumable_wear":  # 수명 아크: 직전 교체·종결 교체 이력
-                t_prev, t_repl = arcs[eq]
+                t_prev, t_repl = sc["arcs"][eq]      # 전역 arcs는 뒤 시나리오에 덮일 수 있음
                 maint.append((eq, ts(t_prev), "BM", f"소모품 교체: {c['part']}"))
                 maint.append((eq, ts(t_repl), "BM", f"소모품 교체: {c['part']}"))
                 events.append((eq, ts(t_prev), "BM", "소모품 교체"))
@@ -427,8 +429,8 @@ def main():
                 "equipment": sc["gap"][0],
                 "from": ts(sc["gap"][1]), "to": ts(sc["gap"][2])},
             "lifecycle": [
-                {"equipment": eq, "prev_replacement": ts(arcs[eq][0]),
-                 "life_exceeded": ts(sc["t0"]), "replacement": ts(arcs[eq][1])}
+                {"equipment": eq, "prev_replacement": ts(sc["arcs"][eq][0]),
+                 "life_exceeded": ts(sc["t0"]), "replacement": ts(sc["arcs"][eq][1])}
                 for c, (eq, _) in zip(sc["causes"], sc["cause_sites"])
                 if c.get("shape") == "consumable_wear"],
             "telemetry_clues": [] if sc["unmatched"] else
