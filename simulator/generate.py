@@ -213,9 +213,12 @@ def main():
         used_sites.add((eq, param))
         return eq, grp
 
-    sid = 0
+    seq = {}                                        # 패턴 슬러그별 일련번호 — 의미 기반 시나리오 ID
+    def scenario_id(slug):
+        seq[slug] = seq.get(slug, 0) + 1
+        return f"SC-{slug}-{seq[slug]:02d}"
+
     for i in range(args.n_single):                  # 단일 원인 (WM-811K)
-        sid += 1
         p = patterns[i % len(patterns)]
         c = pick_cause(p)
         eq, grp = pick_cause_eq(c)
@@ -225,14 +228,13 @@ def main():
         trap_eq = fab["equipment"][trap_step]["instances"][0]
         t0_lo = 26 if c.get("shape") == "consumable_wear" else 10   # 아크: 수명 누적 구간(~23일) 선행 확보
         scenarios.append(dict(
-            scenario_id=f"SC-{sid:03d}", patterns=[p], causes=[c], lots=pick_lots(p),
+            scenario_id=scenario_id(p.upper()), patterns=[p], causes=[c], lots=pick_lots(p),
             cause_sites=[(eq, ch)], t0=float(r.uniform(t0_lo, days - 20)),
             trap_eq=trap_eq, trap_step=trap_step, unmatched=False, source="wm811k"))
     for i in range(args.n_unmatched):               # 매칭불가: 원인 미주입
-        sid += 1
         p = patterns[i % len(patterns)]
         scenarios.append(dict(
-            scenario_id=f"SC-{sid:03d}", patterns=[p], causes=[], lots=pick_lots(p, 6),
+            scenario_id=scenario_id("UNMATCHED"), patterns=[p], causes=[], lots=pick_lots(p, 6),
             cause_sites=[], t0=None, trap_eq=None, trap_step=None,
             unmatched=True, source="wm811k"))
 
