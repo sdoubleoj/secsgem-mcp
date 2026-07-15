@@ -14,6 +14,7 @@ dependencies = [
     "pandas>=2.2",
     "pillow>=10.0",       # 웨이퍼맵 PNG 렌더링
     "ruptures>=1.1",      # change point detection (detect_change_points)
+    "pyyaml>=6.0",        # fab_model.yaml·mapping_table.yaml 로더 (generate, fab_model)
 ]
 
 # flat-layout에 top-level 패키지가 여러 개 → 명시 필수 (auto-discovery 에러 방지)
