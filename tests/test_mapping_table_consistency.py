@@ -21,6 +21,19 @@ def test_multiple_causes_per_pattern():
     for pattern, causes in _mapping().items():
         assert len(causes) >= 3, f"{pattern}: 원인 후보 부족"
 
+def test_field_values_valid():
+    """행동을 결정하는 선택 필드의 값 검증 — 오타가 조용한 분기 오류로 새지 않게"""
+    drift_vocab = {"step_up", "step_down", "linear_up", "linear_down", "none"}
+    for pattern, causes in _mapping().items():
+        for c in causes:
+            assert isinstance(c.get("maint_event", True), bool), (
+                f"{pattern}/{c['cause']}: maint_event는 불리언이어야 함")
+            assert c.get("shape") in (None, "consumable_wear"), (
+                f"{pattern}/{c['cause']}: 알 수 없는 shape '{c.get('shape')}'")
+            assert c["telemetry_signature"]["drift"] in drift_vocab, (
+                f"{pattern}/{c['cause']}: drift '{c['telemetry_signature']['drift']}'가 "
+                f"inject_drift 어휘 {sorted(drift_vocab)}에 없음")
+
 def test_no_placeholders():
     """'...' 등 미완성 플레이스홀더 차단"""
     for pattern, causes in _mapping().items():
